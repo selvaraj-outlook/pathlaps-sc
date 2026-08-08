@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard Step Functions state machine - Service Catalog product.
+  Ships with a placeholder single-Pass-state definition and a dedicated
+  execution role scoped to CloudWatch Logs only - replace the definition
+  after provisioning via your own CI/CD pipeline (this is a starting
+  skeleton, not a working workflow).
+
+Parameters:
+  StateMachineName:
+    Type: String
+  StateMachineType:
+    Type: String
+    Default: STANDARD
+    AllowedValues: [STANDARD, EXPRESS]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/states/${StateMachineName}"
+      RetentionInDays: 30
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${StateMachineName}-execution-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Logging
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Ref StateMachineName
+      StateMachineType: !Ref StateMachineType
+      RoleArn: !GetAtt ExecutionRole.Arn
+      LoggingConfiguration:
+        Level: ERROR
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt LogGroup.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Placeholder - replace via CI/CD",
+          "StartAt": "Placeholder",
+          "States": {
+            "Placeholder": {
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        }
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref StateMachine
+  ExecutionRoleArn:
+    Value: !GetAtt ExecutionRole.Arn

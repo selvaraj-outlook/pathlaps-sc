@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard CloudFront distribution - Service Catalog product.
+  Fronts an existing S3 bucket via Origin Access Control (no public bucket
+  access needed), HTTPS-only viewer traffic. After launch, add a bucket
+  policy on the origin bucket allowing principal cloudfront.amazonaws.com
+  with condition AWS:SourceArn = this distribution's ARN (see Outputs) -
+  CloudFormation can't safely modify a bucket policy it doesn't own via this
+  template.
+
+Parameters:
+  OriginBucketDomainName:
+    Type: String
+    Description: 'Regional domain name of the existing origin S3 bucket, e.g. my-bucket.s3.us-east-1.amazonaws.com'
+  Comment:
+    Type: String
+    Default: ""
+  PriceClass:
+    Type: String
+    Default: PriceClass_100
+    AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+
+Resources:
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Ref Comment
+        PriceClass: !Ref PriceClass
+        HttpVersion: http2
+        DefaultCacheBehavior:
+          TargetOriginId: primary-origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # AWS Managed-CachingOptimized
+        Origins:
+          - Id: primary-origin
+            DomainName: !Ref OriginBucketDomainName
+            OriginAccessControlId: !Ref OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+
+Outputs:
+  DistributionId:
+    Value: !Ref Distribution
+  DistributionDomainName:
+    Value: !GetAtt Distribution.DomainName
+  DistributionArn:
+    Value: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"

@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard ECR repository - Service Catalog product. Image
+  scan-on-push enabled, immutable tags, encrypted at rest.
+
+Parameters:
+  RepositoryName:
+    Type: String
+    Description: Name of the ECR repository
+
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref RepositoryName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  RepositoryName:
+    Value: !Ref Repository
+  RepositoryArn:
+    Value: !GetAtt Repository.Arn
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri

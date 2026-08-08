@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard Security Group - Service Catalog product. Creates a
+  named security group with an optional single ingress rule (port + CIDR).
+  Add further rules out-of-band after provisioning. The group has no egress
+  restrictions (all outbound allowed by default AWS behaviour).
+
+Parameters:
+  GroupName:
+    Type: String
+    Description: Name tag for the security group
+  GroupDescription:
+    Type: String
+    Description: Description for the security group (required by AWS, immutable after creation)
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to create the security group in
+  IngressPort:
+    Type: Number
+    Default: 443
+    MinValue: 0
+    MaxValue: 65535
+    Description: TCP port to open in the optional ingress rule (ignored if IngressCidr is blank)
+  IngressCidr:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional CIDR for the ingress rule (e.g. 10.0.0.0/8). Leave blank
+      to create the group with no inbound rules at all.
+  IngressDescription:
+    Type: String
+    Default: Managed by Service Catalog
+    Description: Description attached to the ingress rule (ignored if IngressCidr is blank)
+
+Conditions:
+  HasIngressRule: !Not [!Equals [!Ref IngressCidr, ""]]
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Ref GroupName
+      GroupDescription: !Ref GroupDescription
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: !If
+        - HasIngressRule
+        - - IpProtocol: tcp
+            FromPort: !Ref IngressPort
+            ToPort: !Ref IngressPort
+            CidrIp: !Ref IngressCidr
+            Description: !Ref IngressDescription
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !Ref GroupName
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  SecurityGroupId:
+    Value: !Ref SecurityGroup
+  SecurityGroupArn:
+    Value: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${SecurityGroup}"

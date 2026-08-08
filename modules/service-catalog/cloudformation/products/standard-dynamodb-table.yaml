@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard DynamoDB table - Service Catalog product. On-demand
+  (pay-per-request) table with encryption at rest and point-in-time
+  recovery enabled.
+
+Parameters:
+  TableName:
+    Type: String
+    Description: Name of the DynamoDB table
+  PartitionKeyName:
+    Type: String
+    Default: id
+    Description: Name of the partition key attribute
+  PartitionKeyType:
+    Type: String
+    Default: S
+    AllowedValues: ["S", "N", "B"]
+    Description: Type of the partition key attribute (String, Number, Binary)
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: !Ref PartitionKeyName
+          AttributeType: !Ref PartitionKeyType
+      KeySchema:
+        - AttributeName: !Ref PartitionKeyName
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  TableName:
+    Value: !Ref Table
+  TableArn:
+    Value: !GetAtt Table.Arn

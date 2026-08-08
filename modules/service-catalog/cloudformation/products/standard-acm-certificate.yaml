@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard ACM certificate - Service Catalog product. DNS-validated,
+  auto-creates its own validation record in the curated hosted zone (same
+  allowlist as the standard-route53-record product) - CloudFormation handles
+  this natively via DomainValidationOptions + HostedZoneId, no custom
+  resource needed.
+
+Parameters:
+  DomainName:
+    Type: String
+    AllowedValues:
+      - path.app.presidio.com
+    Description: >-
+      Must match an entry in the DomainHostedZones mapping below AND the
+      launch role's Route53 permissions in constraints.tf (same allowlist
+      standard-route53-record.yaml uses) - DNS auto-validation needs
+      route53:ChangeResourceRecordSets on that zone.
+  SubjectName:
+    Type: String
+    Description: 'Full certificate subject, e.g. myapp.path.app.presidio.com or *.path.app.presidio.com'
+
+Mappings:
+  DomainHostedZones:
+    path.app.presidio.com:
+      HostedZoneId: Z048880320A4YLK98LLYY
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref SubjectName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref SubjectName
+          HostedZoneId: !FindInMap [DomainHostedZones, !Ref DomainName, HostedZoneId]
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  CertificateArn:
+    Value: !Ref Certificate

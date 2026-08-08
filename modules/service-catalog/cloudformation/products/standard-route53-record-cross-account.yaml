@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs cross-account Route 53 record (Option B) - Service Catalog
+  product meant to be REGISTERED AND LAUNCHED IN ANOTHER ACCOUNT (e.g.
+  Account A), not in the SharedServices hub account. Instead of a native
+  AWS::Route53::RecordSet (which can only touch a zone owned by the account
+  the stack runs in), this invokes a Lambda-backed custom resource that
+  lives in the hub account and makes the actual Route53 call there.
+
+  Prerequisites, both done in the HUB account's Terraform
+  (modules/service-catalog/cross-account-dns.tf), NOT by this template:
+    1. enable_cross_account_route53_handler = true
+    2. This account's local launch/execution role ARN added to
+       cross_account_route53_invoker_principal_arns
+
+  This account's own local launch role (whatever executes THIS stack, in
+  THIS account) also needs lambda:InvokeFunction on the exact hub Lambda ARN
+  hardcoded below - that is a local IAM policy in this account, outside this
+  repo's control.
+
+Parameters:
+  DomainName:
+    Type: String
+    AllowedValues:
+      - path.app.presidio.com
+    Description: Must match an entry in the DomainHostedZones mapping below.
+  RecordName:
+    Type: String
+    Description: Subdomain label only (e.g. "myapp" for myapp.path.app.presidio.com)
+    AllowedPattern: "^[a-zA-Z0-9-]+$"
+  RecordType:
+    Type: String
+    Default: CNAME
+    AllowedValues: [A, CNAME, TXT, MX]
+  RecordValue:
+    Type: String
+  Ttl:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 86400
+
+Mappings:
+  DomainHostedZones:
+    path.app.presidio.com:
+      HostedZoneId: Z048880320A4YLK98LLYY
+
+Resources:
+  Record:
+    Type: Custom::Route53Record
+    Properties:
+      # Fixed hub-account Lambda ARN - must match the
+      # cross_account_route53_handler_function_name deployed by
+      # modules/service-catalog/cross-account-dns.tf in the SharedServices
+      # hub account (743165042770, us-east-1 - see terraform/providers.tf /
+      # versions.tf in that repo). Update this literal if that name/region
+      # ever changes; it cannot be computed from this stack's own
+      # AWS::AccountId/AWS::Region pseudo-parameters since those resolve to
+      # THIS (launching) account, not the hub.
+      ServiceToken: arn:aws:lambda:us-east-1:743165042770:function:path-labs-service-catalog-route53-cross-account-handler
+      HostedZoneId: !FindInMap [DomainHostedZones, !Ref DomainName, HostedZoneId]
+      RecordName: !Sub "${RecordName}.${DomainName}"
+      RecordType: !Ref RecordType
+      RecordValue: !Ref RecordValue
+      Ttl: !Ref Ttl
+
+Outputs:
+  RecordFqdn:
+    Value: !Sub "${RecordName}.${DomainName}"

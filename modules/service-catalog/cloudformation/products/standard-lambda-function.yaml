@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard Lambda function - Service Catalog product. Ships with a
+  placeholder handler (returns 200) and a dedicated execution role scoped to
+  CloudWatch Logs only - replace the code after provisioning via your own
+  CI/CD pipeline.
+
+Parameters:
+  FunctionName:
+    Type: String
+    Description: Name of the Lambda function
+  Runtime:
+    Type: String
+    Default: python3.12
+    AllowedValues: [python3.12, python3.13]
+    Description: >-
+      Lambda runtime. Restricted to Python because the placeholder ZipFile
+      code below is Python - swap the runtime/handler/code together if you
+      need Node.js instead.
+  MemorySize:
+    Type: Number
+    Default: 128
+    MinValue: 128
+    MaxValue: 1024
+  Timeout:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 60
+
+Resources:
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${FunctionName}-execution-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: !Ref Runtime
+      Handler: index.handler
+      Role: !GetAtt ExecutionRole.Arn
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref Timeout
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {"statusCode": 200, "body": "placeholder - replace via CI/CD"}
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt Function.Arn
+  ExecutionRoleArn:
+    Value: !GetAtt ExecutionRole.Arn

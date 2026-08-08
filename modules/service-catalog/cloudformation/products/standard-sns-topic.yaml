@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard SNS topic - Service Catalog product. KMS-encrypted SNS
+  topic for application notifications/alerts.
+
+Parameters:
+  TopicName:
+    Type: String
+    Description: Name of the SNS topic
+
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref TopicName
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  TopicArn:
+    Value: !Ref Topic

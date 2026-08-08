@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard RDS instance - Service Catalog product. Cost-conscious
+  single-AZ instance (no Multi-AZ, small burstable class by default),
+  storage-encrypted, AWS-managed master password in Secrets Manager, not
+  publicly accessible. VPC/subnets are picked from what already exists in
+  this account (native CFN AWS-specific parameter types render as dropdowns
+  in both the CloudFormation console and the Service Catalog launch UI - no
+  extra IAM needed just to populate them).
+
+Parameters:
+  DBInstanceIdentifier:
+    Type: String
+  Engine:
+    Type: String
+    Default: postgres
+    AllowedValues: [postgres, mysql]
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues: [db.t4g.micro, db.t4g.small, db.t4g.medium]
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 500
+  DatabaseName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least 2 subnets in different AZs (RDS DB subnet group requirement)
+  AllowedCidr:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional CIDR allowed to connect on the DB port (e.g. a VPC CIDR).
+      Leave blank to create the security group with no ingress rule at all
+      (add one out-of-band once you know who needs access).
+
+Conditions:
+  HasIngressCidr: !Not [!Equals [!Ref AllowedCidr, ""]]
+
+Mappings:
+  EnginePort:
+    postgres: { Port: 5432 }
+    mysql: { Port: 3306 }
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "${DBInstanceIdentifier} subnet group"
+      SubnetIds: !Ref SubnetIds
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${DBInstanceIdentifier} DB security group"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: !If
+        - HasIngressCidr
+        - - IpProtocol: tcp
+            FromPort: !FindInMap [EnginePort, !Ref Engine, Port]
+            ToPort: !FindInMap [EnginePort, !Ref Engine, Port]
+            CidrIp: !Ref AllowedCidr
+        - !Ref AWS::NoValue
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Ref DBInstanceIdentifier
+      Engine: !Ref Engine
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: !Ref DatabaseName
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref DBSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 3
+      ManageMasterUserPassword: true
+      MasterUsername: dbadmin
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  Endpoint:
+    Value: !GetAtt DBInstance.Endpoint.Address
+  MasterUserSecretArn:
+    Value: !GetAtt DBInstance.MasterUserSecret.SecretArn

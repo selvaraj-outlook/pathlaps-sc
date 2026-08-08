@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard Route 53 record - Service Catalog product. End users
+  pick a domain from a curated dropdown of hosted zones this account
+  actually owns (never a free-text zone ID), then create a single DNS
+  record under it.
+
+Parameters:
+  DomainName:
+    Type: String
+    AllowedValues:
+      - path.app.presidio.com
+    Description: >-
+      Domain to create the record under. This is a curated list of hosted
+      zones that already exist in this account (see the DomainHostedZones
+      mapping below) - adding a new domain here requires the zone to already
+      exist AND its ID to be added to that mapping AND the launch role's
+      Route53 IAM statement (constraints.tf) to include the new zone ARN.
+  RecordName:
+    Type: String
+    Description: >-
+      Subdomain label only (e.g. "myapp" for myapp.path.app.presidio.com) -
+      do not include the domain itself.
+    AllowedPattern: "^[a-zA-Z0-9-]+$"
+  RecordType:
+    Type: String
+    Default: CNAME
+    AllowedValues: [A, CNAME, TXT, MX]
+  RecordValue:
+    Type: String
+    Description: >-
+      Record value (e.g. an IP for A, a hostname for CNAME, quoted text for
+      TXT, "10 mailhost.example.com" for MX). Single value only.
+  Ttl:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 86400
+
+Mappings:
+  DomainHostedZones:
+    path.app.presidio.com:
+      HostedZoneId: Z048880320A4YLK98LLYY
+
+Resources:
+  RecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !FindInMap [DomainHostedZones, !Ref DomainName, HostedZoneId]
+      Name: !Sub "${RecordName}.${DomainName}"
+      Type: !Ref RecordType
+      TTL: !Ref Ttl
+      ResourceRecords:
+        - !Ref RecordValue
+
+Outputs:
+  RecordFqdn:
+    Value: !Sub "${RecordName}.${DomainName}"
+  HostedZoneId:
+    Value: !FindInMap [DomainHostedZones, !Ref DomainName, HostedZoneId]

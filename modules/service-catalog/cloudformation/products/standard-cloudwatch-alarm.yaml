@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard CloudWatch metric alarm - Service Catalog product.
+  Notifies an existing SNS topic (e.g. one provisioned via the
+  standard-sns-topic product) on breach.
+
+Parameters:
+  AlarmName:
+    Type: String
+    Description: Name of the CloudWatch alarm
+  Namespace:
+    Type: String
+    Description: 'CloudWatch metric namespace (e.g. AWS/Lambda, AWS/RDS)'
+  MetricName:
+    Type: String
+    Description: 'CloudWatch metric name (e.g. Errors, CPUUtilization)'
+  DimensionName:
+    Type: String
+    Default: ""
+    Description: 'Optional single metric dimension name (e.g. FunctionName, DBInstanceIdentifier). Leave blank for dimensionless metrics.'
+  DimensionValue:
+    Type: String
+    Default: ""
+    Description: Value for DimensionName. Required if DimensionName is set.
+  Threshold:
+    Type: Number
+  ComparisonOperator:
+    Type: String
+    Default: GreaterThanThreshold
+    AllowedValues:
+      - GreaterThanThreshold
+      - GreaterThanOrEqualToThreshold
+      - LessThanThreshold
+      - LessThanOrEqualToThreshold
+  EvaluationPeriods:
+    Type: Number
+    Default: 1
+  PeriodSeconds:
+    Type: Number
+    Default: 300
+  Statistic:
+    Type: String
+    Default: Average
+    AllowedValues: [Average, Sum, Minimum, Maximum, SampleCount]
+  SnsTopicArn:
+    Type: String
+    Description: ARN of an existing SNS topic to notify on alarm state change
+
+Conditions:
+  HasDimension: !Not [!Equals [!Ref DimensionName, ""]]
+
+Resources:
+  Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Ref AlarmName
+      Namespace: !Ref Namespace
+      MetricName: !Ref MetricName
+      Dimensions: !If
+        - HasDimension
+        - - Name: !Ref DimensionName
+            Value: !Ref DimensionValue
+        - !Ref AWS::NoValue
+      Threshold: !Ref Threshold
+      ComparisonOperator: !Ref ComparisonOperator
+      EvaluationPeriods: !Ref EvaluationPeriods
+      Period: !Ref PeriodSeconds
+      Statistic: !Ref Statistic
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SnsTopicArn
+      OKActions:
+        - !Ref SnsTopicArn
+
+Outputs:
+  AlarmArn:
+    Value: !GetAtt Alarm.Arn

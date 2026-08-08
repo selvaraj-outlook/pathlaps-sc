@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Service Catalog end-user (member) role for spoke accounts in the
+  organization. Deploy this in every account the path-labs-service-catalog
+  portfolio (SharedServices Account, 743165042770) is shared with, so users
+  there can browse and launch shared products.
+
+  Deployment is intentionally OUTSIDE this repo's own Terraform state (this
+  repo only manages the SharedServices/hub account) - either:
+    - auto-deployed by the member_role_stackset in
+      terraform/modules/service-catalog/member-accounts.tf
+      (enable_member_role_stackset = true), or
+    - deployed manually/out-of-band as a CloudFormation StackSet from the
+      Organizations management account, the same way
+      modules/arena-nuke's target-account execution role is deployed.
+
+Parameters:
+  RoleName:
+    Type: String
+    Default: path-labs-service-catalog-member-role
+    Description: Name of the IAM role created in this account
+
+  TrustedPrincipalArns:
+    Type: CommaDelimitedList
+    Description: >
+      Comma-delimited list of IAM principal ARNs (e.g. an IAM Identity
+      Center permission set role, or a specific federated role) allowed to
+      assume this role in this account.
+
+Resources:
+  ServiceCatalogMemberRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref TrustedPrincipalArns
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: path-labs-service-catalog-member-role
+
+Outputs:
+  RoleArn:
+    Description: ARN of the Service Catalog member role in this account
+    Value: !GetAtt ServiceCatalogMemberRole.Arn

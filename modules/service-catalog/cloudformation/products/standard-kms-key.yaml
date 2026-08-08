@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard KMS key - Service Catalog product. Customer-managed
+  symmetric encryption key with automatic annual rotation and an alias.
+
+Parameters:
+  KeyAlias:
+    Type: String
+    Description: Alias for the key (without the "alias/" prefix)
+
+Resources:
+  Key:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Path Labs Service Catalog key - ${KeyAlias}"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableRootAccountPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+  KeyAliasResource:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${KeyAlias}"
+      TargetKeyId: !Ref Key
+
+Outputs:
+  KeyId:
+    Value: !Ref Key
+  KeyArn:
+    Value: !GetAtt Key.Arn

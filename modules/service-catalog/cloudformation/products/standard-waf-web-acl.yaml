@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard WAF v2 Web ACL - Service Catalog product. Regional
+  Web ACL with AWS-managed Core Rule Set and Known Bad Inputs rules enabled,
+  plus a rate-based rule to block IPs that exceed 2000 requests per 5 minutes.
+  Associate with an ALB, API Gateway stage, or AppSync after provisioning.
+
+Parameters:
+  WebAclName:
+    Type: String
+    Description: Name of the Web ACL
+  RateLimit:
+    Type: Number
+    Default: 2000
+    MinValue: 100
+    MaxValue: 20000000
+    Description: >-
+      Maximum requests per 5-minute window per IP before the rate-based rule
+      blocks the source. AWS minimum is 100.
+  DefaultAction:
+    Type: String
+    Default: Allow
+    AllowedValues: [Allow, Block]
+    Description: >-
+      Default action for requests that don't match any rule. Use Allow for
+      most APIs; Block for closed/internal-only surfaces.
+
+Conditions:
+  DefaultAllow: !Equals [!Ref DefaultAction, Allow]
+
+Resources:
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Ref WebAclName
+      Scope: REGIONAL
+      DefaultAction: !If
+        - DefaultAllow
+        - Allow: {}
+        - Block: {}
+      Rules:
+        # AWS-managed Core Rule Set - protects against OWASP Top 10
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 10
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub "${WebAclName}-CommonRuleSet"
+        # AWS-managed Known Bad Inputs - blocks exploits like Log4Shell
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 20
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub "${WebAclName}-KnownBadInputs"
+        # Rate-based rule - IP-level flood protection
+        - Name: RateLimitRule
+          Priority: 30
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref RateLimit
+              AggregateKeyType: IP
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub "${WebAclName}-RateLimit"
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Ref WebAclName
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  WebAclId:
+    Value: !GetAtt WebAcl.Id
+  WebAclArn:
+    Value: !GetAtt WebAcl.Arn
+  WebAclName:
+    Value: !Ref WebAcl

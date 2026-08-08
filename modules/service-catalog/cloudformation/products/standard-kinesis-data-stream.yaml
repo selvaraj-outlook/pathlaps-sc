@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard Kinesis Data Stream - Service Catalog product.
+  Provisioned-mode stream with server-side encryption using the AWS-managed
+  Kinesis key. Defaults to 1 shard (1 MB/s ingest, 2 MB/s read). Increase
+  ShardCount for higher throughput or switch to ON_DEMAND mode after
+  provisioning.
+
+Parameters:
+  StreamName:
+    Type: String
+    Description: Name of the Kinesis Data Stream
+  ShardCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 50
+    Description: Number of shards (each shard = 1 MB/s in, 2 MB/s out)
+  RetentionPeriodHours:
+    Type: Number
+    Default: 24
+    MinValue: 24
+    MaxValue: 8760
+    Description: >-
+      Data retention period in hours. 24 h = default (no extra cost).
+      Extended retention (>24 h) incurs additional charges.
+  StreamMode:
+    Type: String
+    Default: PROVISIONED
+    AllowedValues: [PROVISIONED, ON_DEMAND]
+    Description: >-
+      PROVISIONED = fixed shard count (ShardCount parameter applies).
+      ON_DEMAND = automatically scales; ShardCount is ignored.
+
+Conditions:
+  IsProvisioned: !Equals [!Ref StreamMode, PROVISIONED]
+
+Resources:
+  Stream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: !Ref StreamName
+      ShardCount: !If [IsProvisioned, !Ref ShardCount, !Ref AWS::NoValue]
+      RetentionPeriodHours: !Ref RetentionPeriodHours
+      StreamModeDetails:
+        StreamMode: !Ref StreamMode
+      StreamEncryption:
+        EncryptionType: KMS
+        KeyId: alias/aws/kinesis
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  StreamName:
+    Value: !Ref Stream
+  StreamArn:
+    Value: !GetAtt Stream.Arn

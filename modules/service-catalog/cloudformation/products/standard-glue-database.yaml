@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard Glue Data Catalog database - Service Catalog product.
+  Creates a Glue database (logical namespace for tables/crawlers) and an
+  IAM role with least-privilege permissions for Glue crawlers and ETL jobs
+  to read from S3 and write metadata to the catalog.
+
+Parameters:
+  DatabaseName:
+    Type: String
+    Description: >-
+      Glue Data Catalog database name (lowercase, alphanumeric + underscores)
+  DatabaseDescription:
+    Type: String
+    Default: ""
+    Description: Optional description for the Glue database
+  DataBucketArn:
+    Type: String
+    Description: >-
+      ARN of the S3 bucket that holds the raw data this database will
+      catalog (e.g. arn:aws:s3:::my-data-bucket). The Glue role is granted
+      s3:GetObject + s3:ListBucket on this bucket only.
+
+Resources:
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref DatabaseName
+        Description: !Ref DatabaseDescription
+
+  GlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${DatabaseName}-glue-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: DataBucketAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${DataBucketArn}/*"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Ref DataBucketArn
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  DatabaseName:
+    Value: !Ref DatabaseName
+  GlueRoleArn:
+    Value: !GetAtt GlueRole.Arn

@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard SSM Parameter Store parameter - Service Catalog product.
+
+Parameters:
+  ParameterName:
+    Type: String
+  ParameterValue:
+    Type: String
+    NoEcho: true
+  ParameterType:
+    Type: String
+    Default: String
+    AllowedValues: [String, StringList, SecureString]
+  Tier:
+    Type: String
+    Default: Standard
+    AllowedValues: [Standard, Advanced]
+
+Resources:
+  Parameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Ref ParameterName
+      Type: !Ref ParameterType
+      Value: !Ref ParameterValue
+      Tier: !Ref Tier
+      Tags:
+        ManagedBy: ServiceCatalog
+
+Outputs:
+  ParameterArn:
+    Value: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}"

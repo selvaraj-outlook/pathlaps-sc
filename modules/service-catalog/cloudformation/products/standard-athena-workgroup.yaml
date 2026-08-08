@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard Athena workgroup - Service Catalog product. Workgroup
+  with query result encryption, per-query data-scanned limit to cap costs,
+  and output written to a dedicated S3 prefix. Queries that exceed the
+  per-query scan limit are cancelled automatically.
+
+Parameters:
+  WorkgroupName:
+    Type: String
+    Description: Name of the Athena workgroup
+  ResultsBucketName:
+    Type: String
+    Description: >-
+      Name of an existing S3 bucket where Athena will write query results.
+      The workgroup enforces that all results go here.
+  ResultsPrefix:
+    Type: String
+    Default: athena-results/
+    Description: S3 key prefix (folder) within ResultsBucketName for query output
+  BytesScannedCutoffPerQuery:
+    Type: Number
+    Default: 1073741824
+    MinValue: 10485760
+    Description: >-
+      Maximum bytes scanned per query before it is cancelled (default 1 GB =
+      1073741824). Minimum is 10 MB (10485760). Set lower to prevent
+      accidental full-table scans on large datasets.
+
+Resources:
+  Workgroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Ref WorkgroupName
+      Description: !Sub "Managed workgroup for ${WorkgroupName}"
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        BytesScannedCutoffPerQuery: !Ref BytesScannedCutoffPerQuery
+        PublishCloudWatchMetricsEnabled: true
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${ResultsBucketName}/${ResultsPrefix}"
+          EncryptionConfiguration:
+            EncryptionOption: SSE_S3
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  WorkgroupName:
+    Value: !Ref Workgroup
+  ResultsLocation:
+    Value: !Sub "s3://${ResultsBucketName}/${ResultsPrefix}"

@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard SQS queue - Service Catalog product. SSE-encrypted
+  queue with a companion dead-letter queue and redrive policy.
+
+Parameters:
+  QueueName:
+    Type: String
+    Description: Name of the primary SQS queue
+  MaxReceiveCount:
+    Type: Number
+    Default: 5
+    Description: Number of receives before a message moves to the DLQ
+
+Resources:
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${QueueName}-dlq"
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref QueueName
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  QueueUrl:
+    Value: !Ref Queue
+  QueueArn:
+    Value: !GetAtt Queue.Arn
+  DeadLetterQueueArn:
+    Value: !GetAtt DeadLetterQueue.Arn

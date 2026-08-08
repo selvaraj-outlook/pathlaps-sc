@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard ECS cluster - Service Catalog product. Fargate-only
+  (no EC2 capacity provider), Container Insights enabled.
+
+Parameters:
+  ClusterName:
+    Type: String
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  ClusterArn:
+    Value: !GetAtt Cluster.Arn
+  ClusterName:
+    Value: !Ref Cluster

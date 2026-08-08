@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard API Gateway REST API - Service Catalog product.
+  Creates a regional REST API with a /health GET method returning a mock
+  200 response, a default stage, and a dedicated CloudWatch Logs execution
+  role. Replace the mock integration with your Lambda/HTTP backend after
+  provisioning.
+
+Parameters:
+  ApiName:
+    Type: String
+    Description: Name of the REST API
+  StageName:
+    Type: String
+    Default: v1
+    Description: Deployment stage name (e.g. v1, prod, dev)
+  ThrottlingBurstLimit:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    MaxValue: 5000
+    Description: Stage-level burst throttle limit (requests per second burst)
+  ThrottlingRateLimit:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    MaxValue: 10000
+    Description: Stage-level steady-state throttle rate (requests per second)
+
+Resources:
+  # Execution role so API Gateway can write logs to CloudWatch
+  CloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ApiName}-apigw-cw-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Ref ApiName
+      Description: !Sub "REST API for ${ApiName}"
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+  # /health resource
+  HealthResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: health
+
+  # GET /health - mock integration returning {"status":"ok"}
+  HealthGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref HealthResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: "200"
+            ResponseTemplates:
+              application/json: '{"status":"ok"}'
+      MethodResponses:
+        - StatusCode: "200"
+
+  Deployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: HealthGetMethod
+    Properties:
+      RestApiId: !Ref RestApi
+
+  Stage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref Deployment
+      StageName: !Ref StageName
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingBurstLimit: !Ref ThrottlingBurstLimit
+          ThrottlingRateLimit: !Ref ThrottlingRateLimit
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  ApiId:
+    Value: !Ref RestApi
+  InvokeUrl:
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  RootResourceId:
+    Value: !GetAtt RestApi.RootResourceId

@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard EventBridge scheduled rule - Service Catalog product.
+  Fires on a schedule and publishes to an existing SNS topic (e.g. one
+  provisioned via the standard-sns-topic product). After launch, add a
+  resource policy on that SNS topic allowing principal
+  events.amazonaws.com with condition AWS:SourceArn = this rule's ARN
+  (see Outputs) - CloudFormation can't safely modify a topic policy it
+  doesn't own via this template.
+
+Parameters:
+  RuleName:
+    Type: String
+  ScheduleExpression:
+    Type: String
+    Default: rate(1 day)
+    Description: 'EventBridge schedule expression, e.g. "rate(1 day)" or "cron(0 12 * * ? *)"'
+  SnsTopicArn:
+    Type: String
+    Description: ARN of an existing SNS topic to publish to when the schedule fires
+
+Resources:
+  Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Ref RuleName
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: sns-target
+          Arn: !Ref SnsTopicArn
+
+Outputs:
+  RuleArn:
+    Value: !GetAtt Rule.Arn

@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard ElastiCache Redis cluster - Service Catalog product.
+  Single-node Redis cluster (cluster mode disabled) with encryption at rest
+  and in transit, automatic failover disabled by default to keep costs low.
+  Scale up the node type or enable Multi-AZ after provisioning.
+
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Name for the ElastiCache cluster (used as replication group ID)
+  NodeType:
+    Type: String
+    Default: cache.t4g.micro
+    AllowedValues:
+      - cache.t4g.micro
+      - cache.t4g.small
+      - cache.t4g.medium
+      - cache.r7g.large
+    Description: ElastiCache node type
+  EngineVersion:
+    Type: String
+    Default: "7.1"
+    AllowedValues: ["7.1", "7.0", "6.2"]
+    Description: Redis engine version
+  NumCacheClusters:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 2
+    Description: Number of cache clusters (1 = single node, 2 = primary + replica)
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to place the cluster in
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the cache subnet group (at least 2 different AZs recommended)
+  AllowedCidr:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional CIDR allowed to connect on port 6379. Leave blank for no
+      inbound rule (add out-of-band once you know who needs access).
+
+Conditions:
+  HasIngressCidr: !Not [!Equals [!Ref AllowedCidr, ""]]
+
+Resources:
+  SubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: !Sub "${ClusterName}-subnet-group"
+      Description: !Sub "Subnet group for ${ClusterName}"
+      SubnetIds: !Ref SubnetIds
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ClusterName} Redis security group"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: !If
+        - HasIngressCidr
+        - - IpProtocol: tcp
+            FromPort: 6379
+            ToPort: 6379
+            CidrIp: !Ref AllowedCidr
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+  ReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Ref ClusterName
+      ReplicationGroupDescription: !Sub "${ClusterName} Redis replication group"
+      CacheNodeType: !Ref NodeType
+      Engine: redis
+      EngineVersion: !Ref EngineVersion
+      NumCacheClusters: !Ref NumCacheClusters
+      CacheSubnetGroupName: !Ref SubnetGroup
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      AutomaticFailoverEnabled: false
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  PrimaryEndpoint:
+    Value: !GetAtt ReplicationGroup.PrimaryEndPoint.Address
+  Port:
+    Value: !GetAtt ReplicationGroup.PrimaryEndPoint.Port
+  ReplicationGroupId:
+    Value: !Ref ReplicationGroup

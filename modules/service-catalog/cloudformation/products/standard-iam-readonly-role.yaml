@@ -1,0 +1,47 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Path Labs standard read-only IAM role - Service Catalog product. Deliberately
+  restricted to a curated allowlist of read-only AWS managed policies (never
+  write/admin policies) so end users can self-serve read access without a
+  privilege-escalation path back through Service Catalog.
+
+Parameters:
+  RoleName:
+    Type: String
+    Description: Name of the IAM role
+  TrustedPrincipalArn:
+    Type: String
+    Description: IAM principal ARN (user, role, or account root) allowed to assume this role
+  ManagedPolicyName:
+    Type: String
+    Default: ReadOnlyAccess
+    AllowedValues:
+      - ReadOnlyAccess
+      - ViewOnlyAccess
+      - AmazonS3ReadOnlyAccess
+      - AmazonDynamoDBReadOnlyAccess
+      - CloudWatchReadOnlyAccess
+      - AWSCloudFormationReadOnlyAccess
+    Description: AWS managed read-only policy to attach (curated allowlist only)
+
+Resources:
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref TrustedPrincipalArn
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:aws:iam::aws:policy/${ManagedPolicyName}"
+      Tags:
+        - Key: ManagedBy
+          Value: ServiceCatalog
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt Role.Arn

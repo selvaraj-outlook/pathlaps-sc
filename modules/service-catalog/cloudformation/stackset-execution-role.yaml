@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  CloudFormation StackSet execution role for Service Catalog STACKSET-type
+  constraints. Deploy this in every account listed in
+  stackset_target_accounts (terraform/modules/service-catalog/variables.tf)
+  BEFORE enable_stackset_products is set to true - it is what the
+  stackset_admin_role (terraform/modules/service-catalog/stackset.tf, created
+  in the SharedServices hub account, 743165042770) assumes to actually create
+  a STACKSET product's resources in this account.
+
+  Deployment is OUTSIDE this repo's own Terraform state (this repo only
+  manages the SharedServices/hub account) - deploy manually or via a separate
+  StackSet from the Organizations management account, the same way
+  modules/arena-nuke's target-account execution role is deployed.
+
+Parameters:
+  ExecutionRoleName:
+    Type: String
+    Default: path-labs-service-catalog-stackset-execution-role
+    Description: >
+      Must exactly match stackset_execution_role_name in
+      terraform/modules/service-catalog/variables.tf.
+
+  AdministrationRoleArn:
+    Type: String
+    Description: >
+      ARN of the stackset_admin role in the SharedServices hub account
+      (module output: service_catalog_stackset_admin_role_arn). This role is
+      the only principal trusted to assume the execution role created here.
+
+  ManagedPolicyArns:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: >
+      Optional comma-delimited list of managed policy ARNs to attach, scoped
+      to exactly what your STACKSET products' CloudFormation templates need
+      to create in this account. Leave empty and attach an inline policy of
+      your own choosing if a managed policy isn't a tight enough fit - never
+      attach AdministratorAccess.
+
+Conditions:
+  HasManagedPolicies: !Not [!Equals [!Select [0, !Ref ManagedPolicyArns], ""]]
+
+Resources:
+  StackSetExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref ExecutionRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref AdministrationRoleArn
+            Action: sts:AssumeRole
+      ManagedPolicyArns: !If
+        - HasManagedPolicies
+        - !Ref ManagedPolicyArns
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: path-labs-service-catalog-stackset-execution-role
+
+Outputs:
+  RoleArn:
+    Description: ARN of the StackSet execution role in this account
+    Value: !GetAtt StackSetExecutionRole.Arn
