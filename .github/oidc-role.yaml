@@ -1,0 +1,249 @@
+##############################################################################
+# oidc-role.yaml
+#
+# Creates the GitHub Actions OIDC role in the SharedServices account
+# (743165042770). Deploy this ONCE manually, then store the output RoleArn
+# as a GitHub secret named GH_ACTIONS_ROLE_ARN.
+#
+# Deploy command (run from management terminal, SharedServices profile):
+#   aws cloudformation deploy \
+#     --stack-name github-actions-oidc-role \
+#     --template-file .github/oidc-role.yaml \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --parameter-overrides \
+#         GitHubOrg=selvaraj-outlook \
+#         GitHubRepo=pathlaps-sc \
+#     --profile coda-sharedservices \
+#     --region us-east-1
+#
+# Then add the secret:
+#   gh secret set GH_ACTIONS_ROLE_ARN \
+#     --body "arn:aws:iam::743165042770:role/github-actions-pathlaps-sc" \
+#     --repo selvaraj-outlook/pathlaps-sc
+##############################################################################
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  GitHub Actions OIDC role for the pathlaps-sc repository.
+  Allows GitHub Actions workflows to assume this role via OIDC
+  (no long-lived AWS credentials stored in GitHub secrets).
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: GitHub organisation or username (e.g. selvaraj-outlook)
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name (e.g. pathlaps-sc)
+
+  RoleName:
+    Type: String
+    Default: github-actions-pathlaps-sc
+    Description: Name for the IAM role
+
+  OIDCProviderArn:
+    Type: String
+    Default: ""
+    Description: >
+      ARN of an existing GitHub OIDC provider in this account. Leave blank
+      to create a new one. If one already exists (arn:aws:iam::<account>:
+      oidc-provider/token.actions.githubusercontent.com) provide it here
+      to avoid a conflict error.
+
+Conditions:
+  CreateOIDCProvider: !Equals [!Ref OIDCProviderArn, ""]
+
+Resources:
+  # --------------------------------------------------------------------------
+  # GitHub OIDC Identity Provider (skip if already exists in this account)
+  # --------------------------------------------------------------------------
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  # --------------------------------------------------------------------------
+  # IAM Role - trusted by GitHub Actions OIDC, scoped to this repo only
+  # --------------------------------------------------------------------------
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Plan job - any branch, any PR
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOIDCProvider
+                - !Ref GitHubOIDCProvider
+                - !Ref OIDCProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+              StringLike:
+                "token.actions.githubusercontent.com:sub":
+                  !Sub "repo:${GitHubOrg}/${GitHubRepo}:*"
+
+      # Managed policies - scoped to exactly what Terraform needs for this repo
+      ManagedPolicyArns:
+        - !Ref TerraformPlanPolicy
+        - !Ref TerraformApplyPolicy
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: github-actions-pathlaps-sc
+
+  # --------------------------------------------------------------------------
+  # Plan policy - read-only AWS access for terraform plan
+  # --------------------------------------------------------------------------
+  TerraformPlanPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${RoleName}-plan"
+      Description: Read-only permissions for terraform plan (pathlaps-sc)
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ServiceCatalogRead
+            Effect: Allow
+            Action:
+              - servicecatalog:Describe*
+              - servicecatalog:List*
+              - servicecatalog:Search*
+              - servicecatalog:Get*
+            Resource: "*"
+          - Sid: IAMRead
+            Effect: Allow
+            Action:
+              - iam:Get*
+              - iam:List*
+            Resource: "*"
+          - Sid: S3Read
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:GetBucketVersioning
+              - s3:GetEncryptionConfiguration
+              - s3:GetBucketPublicAccessBlock
+              - s3:GetBucketTagging
+            Resource: "*"
+          - Sid: STSRead
+            Effect: Allow
+            Action:
+              - sts:GetCallerIdentity
+            Resource: "*"
+          - Sid: LambdaRead
+            Effect: Allow
+            Action:
+              - lambda:GetFunction
+              - lambda:GetPolicy
+              - lambda:ListTags
+            Resource: "*"
+          - Sid: CloudFormationRead
+            Effect: Allow
+            Action:
+              - cloudformation:Describe*
+              - cloudformation:List*
+              - cloudformation:Get*
+            Resource: "*"
+
+  # --------------------------------------------------------------------------
+  # Apply policy - write permissions for terraform apply
+  # Scoped to only what this repo's products actually create
+  # --------------------------------------------------------------------------
+  TerraformApplyPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${RoleName}-apply"
+      Description: Write permissions for terraform apply (pathlaps-sc)
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ServiceCatalogWrite
+            Effect: Allow
+            Action:
+              - servicecatalog:Create*
+              - servicecatalog:Update*
+              - servicecatalog:Delete*
+              - servicecatalog:Associate*
+              - servicecatalog:Disassociate*
+              - servicecatalog:EnableAWSOrganizationsAccess
+            Resource: "*"
+          - Sid: IAMWrite
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:TagRole
+              - iam:CreatePolicy
+              - iam:DeletePolicy
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicyVersion
+              - iam:PassRole
+            Resource: "*"
+          - Sid: S3Write
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:DeleteBucket
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:PutBucketVersioning
+              - s3:PutEncryptionConfiguration
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketTagging
+            Resource: "*"
+          - Sid: LambdaWrite
+            Effect: Allow
+            Action:
+              - lambda:CreateFunction
+              - lambda:DeleteFunction
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+              - lambda:AddPermission
+              - lambda:RemovePermission
+              - lambda:TagResource
+            Resource: "*"
+          - Sid: CloudFormationWrite
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:UpdateStack
+              - cloudformation:DeleteStack
+              - cloudformation:CreateStackSet
+              - cloudformation:UpdateStackSet
+              - cloudformation:DeleteStackSet
+              - cloudformation:CreateStackInstances
+              - cloudformation:DeleteStackInstances
+            Resource: "*"
+
+Outputs:
+  RoleArn:
+    Description: >
+      ARN of the GitHub Actions OIDC role. Store this as GitHub secret
+      GH_ACTIONS_ROLE_ARN in the pathlaps-sc repository.
+    Value: !GetAtt GitHubActionsRole.Arn
+
+  OIDCProviderArn:
+    Description: ARN of the GitHub OIDC provider
+    Value: !If
+      - CreateOIDCProvider
+      - !Ref GitHubOIDCProvider
+      - !Ref OIDCProviderArn
