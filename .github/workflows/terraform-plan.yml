@@ -1,10 +1,15 @@
 ##############################################################################
 # terraform-plan.yml
 #
-# Runs on every pull request (and on pushes to non-main branches).
+# Runs on every pull request and on pushes to non-main branches.
 # Jobs:  fmt-check → validate → plan
-# The plan output is posted back as a PR comment.
-# NO apply happens here - that is a separate manual workflow.
+# Plan output is posted back as a PR comment.
+# NO apply happens here — that is a separate manual workflow.
+#
+# Authentication:
+#   OIDC role only — no static AWS keys are used anywhere in this pipeline.
+#   Requires the GH_ACTIONS_ROLE_ARN secret (role deployed via
+#   .github/oidc-role.yaml — see .github/docs/oidc-setup.md).
 ##############################################################################
 name: "Terraform Plan"
 
@@ -12,12 +17,12 @@ on:
   pull_request:
     branches: ["main"]
   push:
-    branches-ignore: ["main"]   # catch direct pushes to feature branches too
+    branches-ignore: ["main"]
 
 permissions:
-  contents: read          # checkout
-  id-token: write         # OIDC → AssumeRoleWithWebIdentity
-  pull-requests: write    # post plan as PR comment
+  contents: read
+  id-token: write        # required for OIDC
+  pull-requests: write   # post plan as PR comment
 
 env:
   TF_VERSION: "1.15.4"
@@ -26,7 +31,7 @@ env:
 
 jobs:
   # --------------------------------------------------------------------------
-  # 1. Format check
+  # 1. Format check (no credentials needed)
   # --------------------------------------------------------------------------
   fmt-check:
     name: "fmt check"
@@ -35,21 +40,17 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform fmt
-        id: fmt
         run: terraform fmt -check -recursive
-        continue-on-error: false
 
   # --------------------------------------------------------------------------
-  # 2. Validate (no AWS creds needed - just syntax check)
+  # 2. Validate (no credentials needed — syntax check only)
   # --------------------------------------------------------------------------
   validate:
     name: "validate"
@@ -59,23 +60,20 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Terraform init (local only - no backend)
+      - name: Terraform init (no backend)
         run: terraform init -backend=false
 
       - name: Terraform validate
-        id: validate
         run: terraform validate -no-color
 
   # --------------------------------------------------------------------------
-  # 3. Plan (assumes role via OIDC - no long-lived credentials stored)
+  # 3. Plan
   # --------------------------------------------------------------------------
   plan:
     name: "plan"
@@ -85,18 +83,16 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: true   # needed to capture plan output
+          terraform_wrapper: true
 
-      # Assumes the GitHub Actions OIDC role in the SharedServices account.
-      # The role ARN is stored as a GitHub secret: GH_ACTIONS_ROLE_ARN
-      # See .github/docs/oidc-setup.md for how to create the role.
+      # ------------------------------------------------------------------
+      # OIDC — assumes GH_ACTIONS_ROLE_ARN, no static AWS keys involved
+      # ------------------------------------------------------------------
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -104,14 +100,21 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: github-actions-plan
 
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
       - name: Terraform init
         id: init
         run: terraform init -no-color
 
       - name: Terraform plan
         id: plan
-        run: terraform plan -no-color -out=tfplan.binary 2>&1 | tee plan-output.txt
-        continue-on-error: true   # post the output even if plan has errors
+        run: |
+          terraform plan \
+            -no-color \
+            -var="aws_profile=" \
+            -out=tfplan.binary 2>&1 | tee plan-output.txt
+        continue-on-error: true
 
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
@@ -122,7 +125,6 @@ jobs:
             plan-output.txt
           retention-days: 5
 
-      # Post plan output as a PR comment
       - name: Post plan to PR
         uses: actions/github-script@v7
         if: github.event_name == 'pull_request'
@@ -132,46 +134,42 @@ jobs:
             const fs = require('fs');
             const planOutput = fs.readFileSync('plan-output.txt', 'utf8');
             const truncated = planOutput.length > 60000
-              ? planOutput.slice(0, 60000) + '\n\n... [truncated - download artifact for full output]'
+              ? planOutput.slice(0, 60000) + '\n\n... [truncated — download artifact for full output]'
               : planOutput;
-
+            const planIcon = '${{ steps.plan.outcome }}' === 'success' ? '✅' : '❌';
+            const initIcon = '${{ steps.init.outcome }}' === 'success' ? '✅' : '❌';
             const body = [
               '## Terraform Plan',
               '',
-              '| Step   | Result |',
-              '|--------|--------|',
-              `| fmt    | ${{ steps.fmt.outcome == 'success' && '✅' || '❌' }} |`,
-              `| init   | ${{ steps.init.outcome == 'success' && '✅' || '❌' }} |`,
-              `| plan   | ${{ steps.plan.outcome == 'success' && '✅' || '❌' }} |`,
+              '| Step     | Result |',
+              '|----------|--------|',
+              `| init     | ${initIcon} |`,
+              `| plan     | ${planIcon} |`,
               '',
-              '<details><summary>Show Plan</summary>',
+              '<details><summary>Show Plan Output</summary>',
               '',
-              '```hcl',
+              '```',
               truncated,
               '```',
-              '',
               '</details>',
               '',
-              `*Triggered by @${{ github.actor }} on \`${{ github.ref }}\`*`,
+              `*Triggered by @${{ github.actor }} — \`${{ github.ref_name }}\`*`,
             ].join('\n');
-
-            // Delete previous plan comments to avoid clutter
+            // Remove previous bot plan comments
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            for (const comment of comments) {
-              if (comment.user.login === 'github-actions[bot]' &&
-                  comment.body.startsWith('## Terraform Plan')) {
+            for (const c of comments) {
+              if (c.user.login === 'github-actions[bot]' && c.body.startsWith('## Terraform Plan')) {
                 await github.rest.issues.deleteComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  comment_id: comment.id,
+                  comment_id: c.id,
                 });
               }
             }
-
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -179,6 +177,6 @@ jobs:
               body,
             });
 
-      - name: Fail if plan failed
+      - name: Fail if plan errored
         if: steps.plan.outcome == 'failure'
         run: exit 1

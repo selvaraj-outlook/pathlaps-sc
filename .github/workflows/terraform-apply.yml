@@ -1,16 +1,12 @@
 ##############################################################################
 # terraform-apply.yml
 #
-# Manual apply - only runs when triggered by hand from the GitHub Actions UI
-# (workflow_dispatch). Only available on the main branch (enforced by the
-# environment protection rule - see .github/docs/oidc-setup.md).
+# Manual apply only — triggered from GitHub Actions UI (workflow_dispatch).
+# Only runs from the main branch. Requires typing APPLY to confirm.
+# Pauses at the "production" environment for human approval before applying.
 #
-# Flow:
-#   1. Re-run plan to generate a fresh plan (never apply a stale plan)
-#   2. Show the plan summary
-#   3. Apply - runs automatically once the environment approval is given
-#      (configure a "production" environment with required reviewers in
-#       GitHub Settings → Environments → production)
+# Authentication: OIDC role only (same as terraform-plan.yml) — no static
+# AWS keys anywhere in this pipeline. Requires the GH_ACTIONS_ROLE_ARN secret.
 ##############################################################################
 name: "Terraform Apply"
 
@@ -18,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Type APPLY to confirm you have reviewed the plan and want to apply"
+        description: "Type APPLY to confirm you have reviewed the plan"
         required: true
         default: ""
 
@@ -33,48 +29,43 @@ env:
 
 jobs:
   # --------------------------------------------------------------------------
-  # Gate: only run from main, only if the user typed APPLY
+  # Gate — branch + confirmation check
   # --------------------------------------------------------------------------
   gate:
-    name: "gate check"
+    name: "gate"
     runs-on: ubuntu-latest
     steps:
-      - name: Verify branch is main
+      - name: Must be main branch
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "❌ Apply is only allowed from the main branch."
-          echo "   Current ref: ${{ github.ref }}"
+          echo "❌ Apply is only allowed from main. Current ref: ${{ github.ref }}"
           exit 1
 
-      - name: Verify confirmation input
+      - name: Must type APPLY
         if: github.event.inputs.confirm != 'APPLY'
         run: |
-          echo "❌ You must type APPLY in the confirmation field to proceed."
-          echo "   Got: '${{ github.event.inputs.confirm }}'"
+          echo "❌ Type APPLY in the confirmation field. Got: '${{ github.event.inputs.confirm }}'"
           exit 1
 
-      - name: Gate passed
-        run: echo "✅ Gate passed — proceeding to plan + apply"
+      - run: echo "✅ Gate passed"
 
   # --------------------------------------------------------------------------
-  # Plan (fresh - never apply a cached plan)
+  # Plan (fresh — never apply a cached plan)
   # --------------------------------------------------------------------------
   plan:
     name: "plan (pre-apply)"
     runs-on: ubuntu-latest
     needs: gate
-    environment: production    # <-- requires reviewer approval in GitHub Settings
+    environment: production   # waits for reviewer approval here
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     outputs:
-      plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+      exitcode: ${{ steps.plan.outputs.exitcode }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: true
@@ -92,18 +83,22 @@ jobs:
       - name: Terraform plan
         id: plan
         run: |
-          terraform plan -no-color -detailed-exitcode -out=tfplan.binary 2>&1 | tee plan-output.txt
+          terraform plan \
+            -no-color \
+            -detailed-exitcode \
+            -var="aws_profile=" \
+            -out=tfplan.binary 2>&1 | tee plan-output.txt
           echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         continue-on-error: true
 
-      - name: Show plan summary
+      - name: Plan summary
         run: |
-          echo "### Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### Plan Output" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -20 plan-output.txt >> $GITHUB_STEP_SUMMARY
+          tail -30 plan-output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload plan artifact
+      - name: Upload plan
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-apply
@@ -112,15 +107,13 @@ jobs:
             plan-output.txt
           retention-days: 1
 
-      - name: Fail if plan errored (exit code 1)
+      - name: Fail on plan error
         if: steps.plan.outputs.exitcode == '1'
-        run: |
-          echo "❌ Plan returned errors. Aborting apply."
-          exit 1
+        run: echo "❌ Plan errored — aborting" && exit 1
 
-      - name: No changes detected
+      - name: No changes
         if: steps.plan.outputs.exitcode == '0'
-        run: echo "✅ No changes - infrastructure is up to date. Apply will be a no-op."
+        run: echo "✅ No changes detected"
 
   # --------------------------------------------------------------------------
   # Apply
@@ -134,11 +127,9 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
@@ -152,7 +143,7 @@ jobs:
       - name: Terraform init
         run: terraform init -no-color
 
-      - name: Download plan artifact
+      - name: Download plan
         uses: actions/download-artifact@v4
         with:
           name: tfplan-apply
@@ -161,10 +152,10 @@ jobs:
       - name: Terraform apply
         run: terraform apply -no-color -auto-approve tfplan.binary
 
-      - name: Write apply summary
+      - name: Apply summary
         if: always()
         run: |
           echo "### Apply Result" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Actor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
