@@ -13,6 +13,8 @@
 #     --parameter-overrides \
 #         GitHubOrg=selvaraj-outlook \
 #         GitHubRepo=pathlaps-sc \
+#         GitHubOwnerId=261786377 \
+#         GitHubRepoId=1328032007 \
 #     --profile coda-sharedservices \
 #     --region us-east-1
 #
@@ -35,6 +37,20 @@ Parameters:
   GitHubRepo:
     Type: String
     Description: GitHub repository name (e.g. pathlaps-sc)
+
+  GitHubOwnerId:
+    Type: String
+    Description: >
+      Numeric GitHub owner (user/org) ID. GitHub's OIDC "sub" claim is
+      prefixed with this immutable ID (repo:OWNER@OWNERID/REPO@REPOID:...)
+      instead of the plain name, so the trust policy must match on it.
+      Find it with: gh api repos/<org>/<repo> --jq .owner.id
+
+  GitHubRepoId:
+    Type: String
+    Description: >
+      Numeric GitHub repository ID. Find it with:
+      gh api repos/<org>/<repo> --jq .id
 
   RoleName:
     Type: String
@@ -92,7 +108,7 @@ Resources:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
               StringLike:
                 "token.actions.githubusercontent.com:sub":
-                  !Sub "repo:${GitHubOrg}/${GitHubRepo}:*"
+                  !Sub "repo:${GitHubOrg}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:*"
 
       # Managed policies - scoped to exactly what Terraform needs for this repo
       ManagedPolicyArns:
