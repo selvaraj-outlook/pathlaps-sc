@@ -15,9 +15,17 @@ aws cloudformation deploy \
   --parameter-overrides \
       GitHubOrg=selvaraj-outlook \
       GitHubRepo=pathlaps-sc \
+      GitHubOwnerId=261786377 \
+      GitHubRepoId=1328032007 \
   --profile coda-sharedservices \
   --region us-east-1
 ```
+
+> GitHub's OIDC `sub` claim is prefixed with the numeric owner/repo IDs
+> (`repo:OWNER@OWNERID/REPO@REPOID:...`), not just the names — the trust
+> policy must match on the ID-suffixed form or every assume-role call is
+> denied. Find the IDs with:
+> `gh api repos/selvaraj-outlook/pathlaps-sc --jq '{owner_id: .owner.id, repo_id: .id}'`
 
 Get the role ARN from the stack output:
 
